@@ -1,0 +1,585 @@
+================================================================
+  Smart Bath Guard — 전체 파일 구조 및 역할 설명
+  (GPT / Claude 등 AI에게 질문할 때 이 파일을 먼저 첨부하세요)
+================================================================
+
+GitHub: https://github.com/bearbearss/iot
+언어: Python (Flask) + Arduino C++ (ESP32) + MicroPython (Pico)
+목적: 욕실 낙상 감지 + 보호자 실시간 모니터링 대시보드
+
+----------------------------------------------------------------
+전체 구조 한눈에 보기
+----------------------------------------------------------------
+
+smart_bathroom_dashboard/
+│
+├── [서버 핵심]
+│   ├── app.py                  ← Flask 서버 메인 (876줄)
+│   ├── config.py               ← 서버 기본 설정 (환경변수 로드)
+│   ├── requirements.txt        ← pip 패키지 목록
+│   ├── start.sh                ← 서버+터널 통합 실행 스크립트
+│   └── .env.example            ← 환경변수 예시 파일
+│
+├── [웹 UI — 브라우저에서 보이는 화면]
+│   ├── templates/
+│   │   ├── index.html          ← 메인 대시보드 (510줄)
+│   │   ├── login.html          ← 보호자 로그인 페이지 (58줄)
+│   │   ├── settings.html       ← 시스템 설정 페이지 (321줄)
+│   │   └── dev_console.html    ← 개발자 디버그 콘솔 (302줄)
+│   └── static/
+│       ├── script.js           ← 프론트엔드 JS (1043줄)
+│       └── style.css           ← 다크 테마 스타일 (1177줄)
+│
+├── [ESP32 / Pico 하드웨어]
+│   └── ESP32_example/
+│       ├── config.h            ← ESP32 설정값 (WiFi/IP/핀번호)
+│       ├── ESP32_dfplayer.ino  ← ESP32 메인 펌웨어 (322줄)
+│       ├── ESP32_setup_ap.ino  ← 최초 설정용 AP 모드 (189줄)
+│       ├── ESP32_fall_sensor.ino ← 구버전 (참고용)
+│       └── pico_servo.py       ← Pico 서보모터 MicroPython (93줄)
+│
+└── [가이드 문서]
+    ├── README.md               ← 프로젝트 전체 설명
+    ├── HOW_TO_RUN.md           ← 실행 방법 요약
+    ├── 연결_설정_가이드.txt    ← ESP32+라즈+터널 연결 가이드
+    └── 센서_코드_수정_가이드.txt ← ToF/mmWave/Pico 코드 수정 가이드
+
+
+================================================================
+파일 1: app.py  (Flask 서버 — 가장 핵심 파일)
+================================================================
+
+역할: 이 프로젝트의 두뇌. ESP32에서 데이터를 받고,
+      낙상 판단을 하고, 웹 대시보드를 서비스합니다.
+
+실행 방법: python app.py  (포트 5000)
+
+─── 주요 전역 변수 ───────────────────────────────────────────
+
+  latest_data     - ESP32에서 마지막으로 받은 센서 데이터
+                    height, angle, mmwave, door, fall_candidate,
+                    fall_detected, servo_status, timestamp 포함
+
+  occupancy{}     - 입퇴실 상태
+                    state: "empty" / "occupied" / "long_stay"
+                    occupied: True / False
+
+  system_sm{}     - 12단계 AI 상태 머신 현재 상태
+                    state: EMPTY / OCCUPIED / FALL_DETECTED 등
+
+  response_state{}  - 낙상 발생 후 60초 응답 대기 상태
+                      mode: "idle" / "awaiting" / "responded" / "notified"
+
+  audio_state{}   - DFPlayer Mini 오디오 재생 상태
+                    playing, current_track, mode 포함
+
+  connection_status{} - 하드웨어 연결 상태 (ESP32, Cloudflare URL 등)
+
+  audio_cmd_queue - ESP32가 폴링해서 가져가는 오디오 명령 큐
+
+─── 주요 함수 ────────────────────────────────────────────────
+
+  save_data(data)
+    - ESP32에서 POST로 받은 데이터를 처리하는 핵심 함수
+    - 낙상 감지 시 자동으로 오디오 큐에 명령 추가
+    - 상태 머신 전환 실행
+
+  compute_system_state()
+    - 현재 센서 데이터 기반으로 12가지 상태 중 하나 반환
+    - 우선순위: RECOVERY > RESPONSE_RECEIVED > GUARDIAN_ALERTED
+              > AWAITING_RESPONSE > FALL_DETECTED > FALL_CANDIDATE
+              > HEIGHT_DROP > MONITORING > OCCUPIED > DOOR_OPEN > EMPTY
+
+  compute_fall_confidence()
+    - 낙상 신뢰도 0~100% 계산
+    - height, mmwave, door, fall 플래그 조합
+
+  update_occupancy(data)
+    - 문 열림/닫힘 + mmWave 조합으로 입퇴실 판단
+    - BL0303 자석 스위치 기반
+
+  _full_exit_reset(data)
+    - 퇴실 시 모든 낙상/오디오 상태 초기화
+
+─── API 엔드포인트 전체 목록 ──────────────────────────────────
+
+  [인증 불필요 — ESP32 내부망용]
+  POST /data                  - ESP32 센서 데이터 수신 (핵심)
+  GET  /esp32/audio-command   - ESP32가 오디오 명령 폴링
+  POST /button/press          - 아케이드 버튼 눌림 이벤트
+  GET  /esp32/config          - ESP32 시작 시 설정 가져가기
+  GET  /api/info              - API 목록 요약
+  GET/POST /api/tunnel-url    - Cloudflare Tunnel URL 등록/조회
+
+  [인증 필요 — 보호자 대시보드용]
+  GET  /                      - 메인 대시보드 페이지
+  GET  /settings              - 설정 페이지
+  GET  /dev-console           - 개발자 콘솔 페이지
+  GET  /api/latest            - 최신 센서+상태 JSON (1초마다 폴링)
+  GET  /api/logs              - 최근 20개 센서 로그
+  GET  /api/events            - 실시간 이벤트 로그 (문개폐, 낙상 등)
+  GET  /api/connection-status - 하드웨어 연결 상태
+  GET/POST /api/settings      - 서버 설정 읽기/저장
+  GET  /api/raw-data          - 전체 서버 상태 스냅샷 (디버그용)
+  POST /start-scan            - 환경 스캔 시작
+  GET  /scan-status           - 스캔 진행 상태
+  GET  /scan-data             - 스캔 결과 데이터
+  POST /audio/play_music      - 배경음악 재생 (0001.mp3)
+  POST /audio/stop            - 오디오 정지
+  POST /audio/warning         - 경고음 재생 (0002.mp3)
+  POST /audio/voice           - 음성 재생 (0003.mp3)
+  POST /audio/volume          - 볼륨 조절
+
+  [시뮬레이션 테스트 — ESP32 없이 테스트할 때]
+  POST /test/normal           - 정상 상태 주입
+  POST /test/warning          - 낙상 의심 주입
+  POST /test/height_drop      - 높이 급감 주입
+  POST /test/fall             - 낙상 감지 주입
+  POST /test/enter            - 입실 시뮬레이션
+  POST /test/exit             - 퇴실 시뮬레이션
+  POST /test/long_stay        - 장시간 체류 시뮬레이션
+  POST /test/respond          - 낙상 응답 버튼 시뮬레이션
+
+─── /api/latest 응답 JSON 구조 ────────────────────────────────
+
+  {
+    "height": 165.0,           // ToF 센서 높이 (cm)
+    "angle": 88,               // 서보 각도 (도)
+    "tof_status": "normal",    // "normal" / "low" / "error"
+    "mmwave": true,            // mmWave 감지 여부
+    "door": "closed",          // "open" / "closed"
+    "fall_candidate": false,   // 낙상 의심
+    "fall_detected": false,    // 낙상 확정
+    "servo_status": "stopped", // "stopped" / "scanning" / "alert"
+    "timestamp": "2024-01-01 12:00:00",
+    "status": "정상",          // "정상" / "낙상 의심" / "낙상 감지" 등
+    "occupancy_state": "empty",// "empty" / "occupied" / "long_stay"
+    "occupied": false,
+    "system_sm": {
+      "state": "EMPTY",        // 12가지 상태 중 하나
+      "prev_state": null,
+      "changed_at": 1700000000.0
+    },
+    "fall_confidence": 0,      // 낙상 신뢰도 0~100%
+    "response_state": {
+      "mode": "idle",          // "idle"/"awaiting"/"responded"/"notified"
+      "fall_ts": null,
+      "deadline_ts": null,     // 응답 마감 Unix 타임스탬프
+      "respond_ts": null,
+      "timeout_s": 60
+    },
+    "audio_state": {
+      "playing": false,
+      "volume": 15,
+      "current_track": 0,      // 1~5
+      "current_name": "없음",
+      "mode": "idle"           // "idle"/"music"/"fall"/"warning"/"voice"
+    },
+    "connection": {
+      "esp32_ok": false,       // ESP32 연결 여부
+      "esp32_last_seen": null,
+      "esp32_ip": null,
+      "pico_ok": false,
+      "cloudflare_url": ""     // Cloudflare Tunnel URL
+    },
+    "scan_state": { ... },
+    "state_history": [ ... ]
+  }
+
+─── ESP32 → Flask 데이터 형식 (POST /data) ─────────────────────
+
+  ESP32가 3초마다 보내는 JSON:
+  {
+    "height": 165.0,
+    "angle": 88,
+    "tof_status": "normal",
+    "mmwave": true,
+    "door": "closed",
+    "fall_candidate": false,
+    "fall_detected": false,
+    "servo_status": "stopped"
+  }
+
+─── 12가지 상태 머신 정의 ──────────────────────────────────────
+
+  상태명              │ 의미            │ 단계
+  ────────────────────┼─────────────────┼──────────
+  EMPTY               │ 욕실 비어있음   │ 정상
+  DOOR_OPEN           │ 문 열림 (빈 욕실)│ 정상
+  ENTERING            │ 입실 중         │ 정상
+  OCCUPIED            │ 욕실 사용 중    │ 정상
+  MONITORING          │ 케어 모드 (장시간)│ 정상
+  HEIGHT_DROP         │ 높이 급감 감지  │ 경계
+  FALL_CANDIDATE      │ 낙상 의심       │ 경계
+  AWAITING_RESPONSE   │ 응답 대기 60초  │ 경계
+  FALL_DETECTED       │ 낙상 확정       │ 긴급
+  GUARDIAN_ALERTED    │ 보호자 알림 발송│ 긴급
+  RESPONSE_RECEIVED   │ 응답 확인 완료  │ 복구
+  RECOVERY            │ 복구 중 (8초)   │ 복구
+
+
+================================================================
+파일 2: config.py  (서버 기본 설정)
+================================================================
+
+역할: app.py가 시작할 때 불러오는 기본값 파일.
+      .env 파일이나 환경변수가 있으면 그것으로 덮어씁니다.
+
+내용:
+  DEVICE_NAME    = "Smart Bath Guard #1"  ← 기기 이름
+  DEVICE_ROOM    = "욕실"
+  SERVER_PORT    = 5000
+  SECRET_KEY     = "change-this-in-production"  ← 세션 암호화 키
+  ACCESS_CODE    = "1234"                        ← 보호자 로그인 PIN
+  WIFI_SSID      = "MyWifi"
+  WIFI_PASSWORD  = "password"
+  ESP32_TIMEOUT_S = 15    ← 이 초 이상 ESP32 무응답 시 "연결 끊김"
+
+수정 방법: config.py 직접 수정 또는 .env 파일로 덮어쓰기
+  .env 예시:
+    ACCESS_CODE=원하는PIN
+    SECRET_KEY=긴랜덤문자열
+
+
+================================================================
+파일 3: requirements.txt  (pip 패키지)
+================================================================
+
+내용:
+  flask>=3.0.0
+  python-dotenv>=1.0.0
+
+설치 명령어:
+  pip install -r requirements.txt
+
+
+================================================================
+파일 4: start.sh  (통합 실행 스크립트)
+================================================================
+
+역할: Flask 서버와 Cloudflare Tunnel을 동시에 시작합니다.
+      터널 URL을 자동으로 감지해서 Flask에 등록합니다.
+
+실행:
+  ./start.sh              ← Flask + cloudflared 동시 실행
+  ./start.sh --no-tunnel  ← Flask만 실행
+  ./start.sh --port 8080  ← 다른 포트로 실행
+
+동작 순서:
+  1. 가상환경 활성화
+  2. Flask 백그라운드 시작
+  3. cloudflared 백그라운드 시작
+  4. 터널 URL 자동 캡처 (최대 30초 대기)
+  5. Flask /api/tunnel-url 에 URL 자동 등록
+  6. URL 출력 (보호자에게 공유)
+  7. Ctrl+C 시 두 프로세스 모두 종료
+
+
+================================================================
+파일 5: templates/index.html  (메인 대시보드 HTML)
+================================================================
+
+역할: 보호자가 보는 메인 화면의 HTML 골격.
+
+주요 구성 요소:
+  #fallOverlay       - 낙상 감지 시 전체 화면 SOS 오버레이
+  .topbar            - 상단 바 (로고 + 배지 + 설정/콘솔 링크)
+  .conn-bar          - 하드웨어 연결 상태 바 (ESP32/Pico/RPi/Cloudflare)
+  #tunnelPanel       - Cloudflare Tunnel URL 공유 패널 (연결 시에만 표시)
+  .status-hero       - 현재 욕실 상태 크게 표시
+  .metrics-row       - 핵심 지표 4개 (높이/각도/mmWave/문)
+  #smCard            - AI 상태 머신 카드 (12단계 흐름 시각화)
+  .map-card          - 욕실 환경 맵 (Canvas 위치맵 + Radar 차트)
+  .music-card        - DFPlayer Mini 오디오 제어 + SD카드 트랙 목록
+  .sensor-grid       - 센서 상세 8개 카드
+  #responseCard      - 낙상 대응 현황 (60초 타이머 + 아케이드 버튼)
+  .event-card        - 실시간 이벤트 로그
+  .test-card         - 시연 테스트 버튼
+  .log-card          - 이벤트 로그 테이블
+  .flow-card         - 시스템 구조도
+
+스크립트 로딩:
+  Chart.js (CDN)
+  static/script.js
+
+
+================================================================
+파일 6: templates/login.html  (로그인 페이지)
+================================================================
+
+역할: 보호자 PIN 코드 입력 화면.
+      올바른 코드 입력 시 / 로 리다이렉트, 24시간 세션 유지.
+
+
+================================================================
+파일 7: templates/settings.html  (설정 페이지)
+================================================================
+
+역할: 서버 설정을 웹에서 수정 + 저장 (재시작 없이 즉시 반영).
+
+주요 섹션:
+  - 하드웨어 연결 상태 (ESP32/Pico/RPi/Cloudflare 초록/빨강 점)
+  - Cloudflare Tunnel URL 표시 + 복사 버튼
+  - 기기 이름 / 설치 공간 수정
+  - WiFi SSID / 비밀번호 / Flask 포트 / ESP32 타임아웃
+  - 보안 PIN 변경
+  - ESP32 config.h 미리보기
+
+저장 방식: /api/settings POST → settings.json 파일로 저장
+
+
+================================================================
+파일 8: templates/dev_console.html  (개발자 콘솔)
+================================================================
+
+역할: 하드웨어 연동 테스트 전용 화면.
+
+주요 기능:
+  - ESP32 핑 테스트
+  - 마지막 수신 데이터 실시간 JSON 표시
+  - 전체 서버 상태 스냅샷
+  - API 직접 테스터 (URL + body 입력 → 결과 표시)
+  - 8가지 빠른 시나리오 테스트 버튼
+  - 하드웨어 연동 7단계 체크리스트
+
+
+================================================================
+파일 9: static/script.js  (프론트엔드 JavaScript)
+================================================================
+
+역할: 브라우저에서 1초마다 서버를 폴링해서 UI를 갱신합니다.
+
+주요 함수:
+  fetchLatest()       - /api/latest 폴링 → 모든 UI 업데이트
+  fetchLogs()         - /api/logs 폴링 → 로그 테이블 갱신
+  fetchEvents()       - /api/events 폴링 → 이벤트 로그 갱신
+
+  updateHero(data)         - 상단 상태 히어로 섹션 업데이트
+  updateMetrics(data)      - 4개 지표 카드 업데이트
+  updateSensorCards(data)  - 8개 센서 상세 카드 업데이트
+  updateAudioUI(as)        - DFPlayer 재생 상태 표시
+  updateFallResponseUI(data) - 낙상 60초 타이머 + LED 버튼 UI
+  updateSystemState(data)  - AI 상태 머신 카드 (12단계 흐름)
+  updateConnBar(conn)      - 상단 연결 상태 바 업데이트
+  _updateTunnelPanel(url)  - Cloudflare 공유 링크 패널 표시/숨김
+  drawBathroomCanvas(data) - HTML Canvas로 욕실 맵 그리기
+  updateRadarChart(sd)     - Chart.js 레이더 차트 업데이트
+
+  sendTest(type)      - 시연 테스트 버튼 → /test/* POST
+  copyTunnelUrl()     - Cloudflare URL 클립보드 복사
+
+폴링 주기: 1초 (setInterval 3개)
+
+
+================================================================
+파일 10: static/style.css  (스타일시트)
+================================================================
+
+역할: 전체 UI 다크 테마 스타일.
+      CSS 변수(--cyan, --green, --red 등)로 색상 관리.
+
+주요 섹션:
+  :root 변수         - 색상, 폰트, 간격 통일 관리
+  .topbar            - 상단 바
+  .conn-bar          - 하드웨어 연결 상태 바
+  .tunnel-panel      - Cloudflare URL 공유 패널
+  .status-hero       - 상태 히어로 (s-normal/s-warning/s-fall)
+  .metrics-row       - 지표 카드 4개
+  .sm-card           - AI 상태 머신 카드
+  .map-card          - 욕실 맵
+  .music-card        - 오디오 제어
+  .sensor-grid       - 센서 8개 카드
+  .response-card     - 낙상 대응 현황 + LED 버튼
+  .event-card        - 이벤트 로그
+  .test-card         - 테스트 버튼
+  .settings-*        - 설정 페이지
+  .dev-cols          - 개발자 콘솔
+  반응형 미디어 쿼리  - 600px, 400px 브레이크포인트
+
+
+================================================================
+파일 11: ESP32_example/config.h  (ESP32 설정 파일)
+================================================================
+
+역할: ESP32 펌웨어에서 유일하게 수정해야 하는 설정 파일.
+      #define 상수로 WiFi / 서버 / 핀 / 타이머 설정.
+
+현재 내용:
+  #define WIFI_SSID       "공유기이름"       ← 수정 필수
+  #define WIFI_PASSWORD   "WiFi비밀번호"    ← 수정 필수
+  #define SERVER_IP       "192.168.0.xxx"  ← 수정 필수 (라즈베리파이 IP)
+  #define SERVER_PORT     5000
+
+  #define DOOR_PIN        27   // BL0303 자석 스위치
+  #define LED_PIN         2    // 내장 LED
+  #define BUTTON_PIN      34   // 아케이드 버튼
+
+  // 아래는 센서 연결 후 추가 예정
+  // #define TOF_SDA_PIN  21
+  // #define TOF_SCL_PIN  22
+  // #define MMWAVE_PIN   35
+  // #define PICO_RX_PIN  25
+  // #define PICO_TX_PIN  26
+
+  #define DATA_INTERVAL_MS   3000  // 3초마다 데이터 전송
+  #define AUDIO_INTERVAL_MS   500  // 0.5초마다 오디오 명령 폴링
+  #define WIFI_RETRY_MAX       20
+
+  #define DEBUG_SERIAL    true  // false로 바꾸면 Serial 출력 꺼짐
+
+
+================================================================
+파일 12: ESP32_example/ESP32_dfplayer.ino  (ESP32 메인 펌웨어)
+================================================================
+
+역할: ESP32가 실행하는 메인 코드. 센서 읽기 + 데이터 전송 + 오디오 제어.
+      Arduino IDE로 ESP32에 업로드합니다.
+
+필요 라이브러리 (Arduino IDE에서 설치):
+  - DFRobotDFPlayerMini
+  - ArduinoJson
+
+주요 함수:
+  setup()             - WiFi 연결, DFPlayer 초기화, 핀 설정
+  loop()              - 주기적으로 4가지 작업 반복
+
+  pollAudioCommand()  - 500ms마다 Flask에서 오디오 명령 가져오기
+                        GET /esp32/audio-command
+  sendSensorData()    - 3000ms마다 센서 데이터를 Flask에 POST
+                        ★ 현재는 더미값, 실제 센서 코드로 교체 필요
+  checkButton()       - 50ms마다 아케이드 버튼 상태 확인
+  postButtonPress()   - 버튼 눌림 시 Flask에 POST /button/press
+  checkPlayFinished() - DFPlayer 재생 완료 감지 → 낙상 시 순차 재생
+  ensureWiFi()        - WiFi 끊기면 자동 재연결
+
+현재 더미값 위치 (실제 센서로 교체 필요한 줄):
+  sendSensorData() 함수 안:
+    float height = 165.0;   ← VL53L0X ToF로 교체 (센서_코드_수정_가이드.txt 참고)
+    int   angle  = 88;      ← Pico UART로 교체
+    bool  mmwave = true;    ← mmWave GPIO로 교체
+
+DFPlayer SD카드 파일 구조 (/MP3 폴더):
+  0001.mp3 → 평상시 배경 음악 (입실 시 자동 재생)
+  0002.mp3 → 경고음 (낙상 감지 시 자동 재생)
+  0003.mp3 → "낙상이 감지되었습니다." (경고음 후 자동 재생)
+  0004.mp3 → "괜찮으십니까?" (낙상 의심 시 재생)
+  0005.mp3 → "응답이 없으면 보호자에게..." (응답 없을 시 재생)
+
+
+================================================================
+파일 13: ESP32_example/ESP32_setup_ap.ino  (최초 설정 펌웨어)
+================================================================
+
+역할: ESP32 처음 사용할 때만 쓰는 설정 도구.
+      최초 1회 업로드 → WiFi/서버 설정 완료 → ESP32_dfplayer.ino로 교체.
+
+동작 방식:
+  1. ESP32를 "SmartBathroom_Setup" WiFi AP로 켬 (비번: setup1234)
+  2. 스마트폰으로 접속 → 브라우저에서 192.168.4.1 접속
+  3. 공유기 이름 / 비밀번호 / 서버 IP 입력
+  4. 저장 → ESP32 내부 Preferences 에 저장 후 재부팅
+  5. 이후 이 설정값으로 WiFi 자동 연결
+
+※ 한 번 설정 후에는 이 파일 대신 ESP32_dfplayer.ino 사용
+
+
+================================================================
+파일 14: ESP32_example/pico_servo.py  (Pico MicroPython)
+================================================================
+
+역할: Raspberry Pi Pico에서 실행하는 서보모터 제어 코드.
+      서보를 35°~140° 왕복하며 현재 각도를 UART로 ESP32에 전송.
+
+업로드 방법: Thonny IDE → Pico에 main.py 로 저장
+
+동작:
+  - 서보모터를 35°에서 140°까지 5° 씩 이동 (0.35초 간격)
+  - 이동할 때마다 "ANGLE:35\n" 형식으로 UART 전송
+  - ESP32는 이 값을 읽어서 Flask로 전달
+
+설정 변경 위치:
+  SERVO_PIN   = 15    ← 서보 연결 핀
+  ANGLE_MIN   = 35    ← 스캔 시작 각도
+  ANGLE_MAX   = 140   ← 스캔 끝 각도
+  SCAN_STEP   = 5     ← 한 번에 몇 도씩 이동
+  SCAN_DELAY  = 0.35  ← 각도마다 대기 시간 (초)
+
+
+================================================================
+파일 15: .env.example  (환경변수 예시)
+================================================================
+
+역할: .env 파일을 만들 때 복사해서 쓰는 템플릿.
+
+.env 파일로 복사 후 수정:
+  cp .env.example .env
+  nano .env
+
+설정 가능 항목:
+  ACCESS_CODE   - 보호자 로그인 PIN (기본: 1234)
+  SECRET_KEY    - 세션 암호화 키 (긴 랜덤 문자열 권장)
+  DEVICE_NAME   - 기기 이름 표시용
+  TUNNEL_URL    - Cloudflare Tunnel URL 직접 지정 (선택)
+
+
+================================================================
+파일 16: 연결_설정_가이드.txt
+================================================================
+
+역할: ESP32 + Raspberry Pi + Cloudflare Tunnel 연결 방법 가이드.
+
+포함 내용:
+  PART 1: Raspberry Pi Flask 서버 설치 및 실행 (6단계)
+  PART 2: ESP32 config.h 수정 위치 및 Arduino IDE 업로드 방법
+  PART 3: cloudflared 설치 + ./start.sh 실행 방법 + 보호자 접속 방법
+  PART 4: 매번 실행 순서 요약 (7단계)
+  PART 5: 오류 상황별 해결 방법
+  PART 6: 수정해야 할 파일 vs 건드리지 않아도 되는 파일
+
+
+================================================================
+파일 17: 센서_코드_수정_가이드.txt
+================================================================
+
+역할: 현재 더미값으로 동작하는 센서 코드를 실제 하드웨어로 교체하는 가이드.
+
+포함 내용:
+  PART 1: config.h에 추가할 핀 번호 (TOF/mmWave/Pico)
+  PART 2: VL53L0X ToF 센서 배선 + 라이브러리 + 코드 추가 위치
+  PART 3: mmWave 레이더 배선 + digitalRead 코드 추가 위치
+  PART 4: Pico 서보모터 UART 배선 + readPicoData() 추가 위치
+  PART 5: 세 센서 통합한 sendSensorData() 완성본
+  PART 6: 낙상 기준값 (height 임계값) 조정 방법
+  PART 7: 수정 파일 목록 요약
+  PART 8: 14단계 체크리스트
+
+
+================================================================
+GPT/Claude에게 질문할 때 활용 방법
+================================================================
+
+  이 파일을 첨부하거나 붙여넣기 한 후:
+
+  예시 질문 1 (ESP32 관련):
+    "위 구조를 참고해서 ESP32_dfplayer.ino의 sendSensorData()에
+     VL53L0X 센서 코드를 추가해줘"
+
+  예시 질문 2 (Flask 관련):
+    "app.py에 낙상 감지 시 카카오톡 메시지를 보내는 기능을 추가해줘.
+     /api/latest 응답 구조를 참고해서"
+
+  예시 질문 3 (UI 관련):
+    "templates/index.html 과 static/script.js 를 수정해서
+     낙상 감지 시 소리 알림 대신 진동 알림을 추가해줘"
+
+  예시 질문 4 (Pico 관련):
+    "pico_servo.py에서 서보가 특정 각도에서 멈추는 기능을
+     Flask API 명령으로 받아서 실행하도록 수정해줘"
+
+================================================================
+작성일: 2026-05-25
+프로젝트: Smart Bath Guard
+GitHub: https://github.com/bearbearss/iot
+총 파일 수: 20개 (코드 17 + 가이드 3)
+총 코드 줄 수: 약 5,100줄
+================================================================
