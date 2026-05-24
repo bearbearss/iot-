@@ -1114,3 +1114,64 @@ body {
   .sensor-grid { grid-template-columns: 1fr 1fr; }
   .login-card  { padding: 24px 18px; }
 }
+
+/* ── Cloudflare Tunnel 공유 패널 ─────────────────────────── */
+.tunnel-panel {
+  background: linear-gradient(90deg,
+    rgba(0,212,255,.05) 0%,
+    rgba(0,84,122,.08) 50%,
+    rgba(0,212,255,.05) 100%);
+  border-bottom: 1px solid rgba(0,212,255,.18);
+  border-top: 1px solid rgba(0,212,255,.08);
+}
+.tunnel-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 9px 24px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.tunnel-icon { font-size: 1rem; flex-shrink: 0; }
+.tunnel-info { flex: 1; min-width: 0; }
+.tunnel-label {
+  font-size: .68rem;
+  color: var(--txt3);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  margin-bottom: 2px;
+}
+.tunnel-link {
+  color: var(--cyan);
+  font-size: .83rem;
+  font-family: 'Courier New', monospace;
+  text-decoration: none;
+  word-break: break-all;
+  transition: opacity var(--tr);
+}
+.tunnel-link:hover { opacity: .75; text-decoration: underline; }
+.tunnel-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.tunnel-copy-btn,
+.tunnel-open-btn {
+  padding: 5px 13px;
+  border-radius: 6px;
+  font-size: .75rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid rgba(0,212,255,.3);
+  background: rgba(0,212,255,.08);
+  color: var(--cyan);
+  transition: background var(--tr), border-color var(--tr);
+  white-space: nowrap;
+}
+.tunnel-copy-btn:hover,
+.tunnel-open-btn:hover {
+  background: rgba(0,212,255,.18);
+  border-color: rgba(0,212,255,.5);
+}
+@media (max-width: 600px) {
+  .tunnel-inner { padding: 8px 16px; gap: 10px; }
+  .tunnel-actions { width: 100%; }
+  .tunnel-copy-btn, .tunnel-open-btn { flex: 1; text-align: center; }
+}

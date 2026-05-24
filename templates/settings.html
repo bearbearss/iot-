@@ -144,6 +144,31 @@
     <div class="save-msg" id="saveMsg"></div>
   </div>
 
+  <!-- Cloudflare Tunnel 상태 -->
+  <div class="card">
+    <div class="card-hdr">
+      <span>☁️ Cloudflare Tunnel</span>
+      <span class="tag" id="cfTunnelTag">확인 중…</span>
+    </div>
+    <div class="card-desc">
+      <code>./start.sh</code> 실행 시 자동으로 터널이 시작되고 아래 링크가 활성화됩니다.<br>
+      보호자에게 이 링크를 공유하면 외부에서 대시보드에 접속할 수 있습니다.
+    </div>
+    <div id="cfTunnelActive" style="display:none">
+      <div class="sg-row" style="align-items:center;gap:10px;flex-wrap:wrap">
+        <label class="sg-label" style="margin:0;flex-shrink:0">외부 접속 링크</label>
+        <a class="tunnel-link" id="cfTunnelUrl" href="#" target="_blank" rel="noopener"
+           style="flex:1;min-width:0">-</a>
+        <button class="tunnel-copy-btn" id="cfCopyBtn" onclick="copyCfUrl()">📋 복사</button>
+      </div>
+    </div>
+    <div id="cfTunnelInactive" class="sg-info-box" style="margin-top:0">
+      <div class="sg-info-label">터널 시작 방법</div>
+      <code class="sg-code">./start.sh</code>
+      <span class="sg-info-desc">또는 별도 터미널에서 <code>cloudflared tunnel --url http://localhost:5000</code></span>
+    </div>
+  </div>
+
   <!-- ESP32 설정 파일 빠른 참조 -->
   <div class="card">
     <div class="card-hdr">
@@ -203,6 +228,42 @@ async function loadConnStatus() {
 
   document.getElementById("connRefreshTag").textContent = "방금 업데이트";
   document.getElementById("connRefreshTag").className   = "tag tag-ok";
+
+  // Cloudflare Tunnel 패널 업데이트
+  updateCfTunnelSection(cfUrl);
+}
+
+function updateCfTunnelSection(url) {
+  const tag      = document.getElementById("cfTunnelTag");
+  const active   = document.getElementById("cfTunnelActive");
+  const inactive = document.getElementById("cfTunnelInactive");
+  const urlEl    = document.getElementById("cfTunnelUrl");
+  if (!tag) return;
+  if (url) {
+    tag.textContent = "연결됨"; tag.className = "tag tag-ok";
+    if (active)   { active.style.display   = ""; urlEl.textContent = url; urlEl.href = url; }
+    if (inactive) inactive.style.display = "none";
+  } else {
+    tag.textContent = "미연결"; tag.className = "tag";
+    if (active)   active.style.display   = "none";
+    if (inactive) inactive.style.display = "";
+  }
+}
+
+let _cfUrl = "";
+function copyCfUrl() {
+  const urlEl = document.getElementById("cfTunnelUrl");
+  const btn   = document.getElementById("cfCopyBtn");
+  const url   = urlEl?.textContent || "";
+  if (!url || url === "-") return;
+  navigator.clipboard.writeText(url).then(() => {
+    if (btn) { btn.textContent = "✅ 복사됨!"; setTimeout(() => { btn.textContent = "📋 복사"; }, 2500); }
+  }).catch(() => {
+    const ta = document.createElement("textarea");
+    ta.value = url; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta);
+    if (btn) { btn.textContent = "✅ 복사됨!"; setTimeout(() => { btn.textContent = "📋 복사"; }, 2500); }
+  });
 }
 
 function setCS(dotId, cardId, detailId, ok, detail) {

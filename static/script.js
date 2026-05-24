@@ -796,22 +796,12 @@ function renderEvents(events) {
 // ════════════════════════════════════════════════════════
 // 10. 하드웨어 연결 상태 바
 // ════════════════════════════════════════════════════════
+
+let _tunnelUrl = "";   // 현재 터널 URL 캐시
+
 function updateConnBar(conn) {
   if (!conn) return;
 
-  function setBar(id, ok, label) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.className  = ok ? "cstatus ok" : "cstatus err";
-    const dot = el.querySelector(".csdot");
-    if (dot) dot.className = "csdot";   // CSS class handles color via parent
-    el.childNodes[1 /* text node */];   // label is static
-    // keep label text, just update class
-    const span = el.querySelector("span");
-    if (span) span.className = "csdot";
-  }
-
-  // Inline helper — set badge class & update dot
   function setBadge(id, ok) {
     const el = document.getElementById(id);
     if (!el) return;
@@ -820,8 +810,22 @@ function updateConnBar(conn) {
 
   setBadge("cs-esp32", conn.esp32_ok);
   setBadge("cs-pico",  conn.pico_ok);
-  // RPi is always ok (we're running)
-  setBadge("cs-cf",    !!conn.cloudflare_url);
+  // RPi는 항상 ok (서버가 실행 중이므로)
+  setBadge("cs-cf", !!conn.cloudflare_url);
+
+  // Cloudflare 배지 — URL이 있으면 클릭 가능
+  const cfEl = document.getElementById("cs-cf");
+  if (cfEl) {
+    if (conn.cloudflare_url) {
+      cfEl.title  = conn.cloudflare_url;
+      cfEl.style.cursor = "pointer";
+      cfEl.onclick = () => window.open(conn.cloudflare_url, "_blank");
+    } else {
+      cfEl.title  = "Cloudflare Tunnel — start.sh 실행 시 자동 연결";
+      cfEl.style.cursor = "default";
+      cfEl.onclick = null;
+    }
+  }
 
   const note = document.getElementById("connNote");
   if (note) {
@@ -832,10 +836,48 @@ function updateConnBar(conn) {
       note.textContent = `ESP32 연결됨 · ${conn.esp32_ip || ""} ${ago}`;
       note.style.color = "var(--txt3)";
     } else {
-      note.textContent = "ESP32 미연결 — 설정 확인";
+      note.textContent = "ESP32 미연결 — config.h SERVER_IP 확인";
       note.style.color = "rgba(255,183,0,.7)";
     }
   }
+
+  // 터널 공유 패널
+  _updateTunnelPanel(conn.cloudflare_url || "");
+}
+
+function _updateTunnelPanel(url) {
+  const panel = document.getElementById("tunnelPanel");
+  if (!panel) return;
+
+  if (url && url !== _tunnelUrl) {
+    _tunnelUrl = url;
+    const link = document.getElementById("tunnelLink");
+    if (link) { link.textContent = url; link.href = url; }
+  }
+
+  panel.style.display = url ? "" : "none";
+}
+
+function copyTunnelUrl() {
+  if (!_tunnelUrl) return;
+  navigator.clipboard.writeText(_tunnelUrl).then(() => {
+    const btn = document.getElementById("tunnelCopyBtn");
+    if (!btn) return;
+    btn.textContent = "✅ 복사됨!";
+    setTimeout(() => { btn.textContent = "📋 복사"; }, 2500);
+  }).catch(() => {
+    // clipboard API 실패 시 fallback
+    const ta = document.createElement("textarea");
+    ta.value = _tunnelUrl; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    document.execCommand("copy"); document.body.removeChild(ta);
+    const btn = document.getElementById("tunnelCopyBtn");
+    if (btn) { btn.textContent = "✅ 복사됨!"; setTimeout(() => { btn.textContent = "📋 복사"; }, 2500); }
+  });
+}
+
+function openTunnelUrl() {
+  if (_tunnelUrl) window.open(_tunnelUrl, "_blank");
 }
 
 

@@ -48,7 +48,7 @@ app.permanent_session_lifetime = timedelta(hours=24)
 connection_status = {
     "esp32_last_seen": None,  # Unix ts — 마지막 데이터 수신 시각
     "esp32_ip":        None,  # ESP32 IP 주소
-    "cloudflare_url":  "",    # Cloudflare 터널 URL
+    "cloudflare_url":  os.environ.get("TUNNEL_URL", ""),  # 시작 시 환경변수로도 설정 가능
 }
 
 # ── 센서 상태 ──────────────────────────────────────────────
@@ -737,6 +737,33 @@ def test_respond():
         add_event("사용자 응답 확인 완료 (웹 시뮬레이션)", "occupancy")
         return jsonify({"status": "ok", "message": "응답 처리 완료"}), 200
     return jsonify({"status": "error", "message": "대기 중인 낙상 알림 없음"}), 400
+
+
+# ── Cloudflare Tunnel URL 등록 (start.sh → Flask 전달) ────
+@app.route("/api/tunnel-url", methods=["GET", "POST"])
+def api_tunnel_url():
+    """
+    GET  : 현재 터널 URL 조회 (인증 불필요)
+    POST : start.sh 가 cloudflared URL 을 Flask 에 등록
+           { "url": "https://xxxx.trycloudflare.com" }
+    """
+    if request.method == "GET":
+        return jsonify({
+            "url":    connection_status["cloudflare_url"],
+            "active": bool(connection_status["cloudflare_url"]),
+        }), 200
+
+    data = request.get_json(silent=True) or {}
+    url  = data.get("url", "").strip()
+    if not url:
+        return jsonify({"status": "error", "message": "url required"}), 400
+    if not (url.startswith("https://") and ("trycloudflare.com" in url or "cloudflare" in url)):
+        return jsonify({"status": "error", "message": "invalid tunnel URL"}), 400
+
+    connection_status["cloudflare_url"] = url
+    add_event(f"Cloudflare Tunnel 연결됨: {url}", "occupancy")
+    print(f"[TUNNEL] URL 등록됨: {url}")
+    return jsonify({"status": "ok", "url": url}), 200
 
 
 # ── API 구조 요약 (개발 참고용) ────────────────────────────

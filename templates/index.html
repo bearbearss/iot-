@@ -61,10 +61,25 @@
     <span class="cstatus ok" id="cs-rpi"   title="Raspberry Pi — 서버 실행 중">
       <span class="csdot"></span>Raspberry Pi
     </span>
-    <span class="cstatus" id="cs-cf"   title="Cloudflare Tunnel">
+    <span class="cstatus" id="cs-cf" title="Cloudflare Tunnel">
       <span class="csdot"></span>Cloudflare
     </span>
     <span class="conn-bar-note" id="connNote">ESP32 대기 중…</span>
+  </div>
+</div>
+
+<!-- ── Cloudflare Tunnel 공유 링크 패널 (터널 연결 시 표시) ── -->
+<div class="tunnel-panel" id="tunnelPanel" style="display:none">
+  <div class="tunnel-inner">
+    <span class="tunnel-icon">☁️</span>
+    <div class="tunnel-info">
+      <div class="tunnel-label">외부 접속 링크 · Cloudflare Tunnel</div>
+      <a class="tunnel-link" id="tunnelLink" href="#" target="_blank" rel="noopener">-</a>
+    </div>
+    <div class="tunnel-actions">
+      <button class="tunnel-copy-btn" id="tunnelCopyBtn" onclick="copyTunnelUrl()">📋 복사</button>
+      <button class="tunnel-open-btn" onclick="openTunnelUrl()">↗ 열기</button>
+    </div>
   </div>
 </div>
 
