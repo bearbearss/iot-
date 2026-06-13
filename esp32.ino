@@ -40,8 +40,10 @@ HardwareSerial dfSerial(1);      // UART1: DFPlayer
 DFRobotDFPlayerMini dfPlayer;
 
 // ── 타이머 ───────────────────────────────────────────────────
-unsigned long lastDataMs  = 0;
-unsigned long lastAudioMs = 0;
+unsigned long lastDataMs   = 0;
+unsigned long lastAudioMs  = 0;
+unsigned long lastWifiRetry = 0;
+const unsigned long WIFI_RETRY_INTERVAL_MS = 30000;  // 30초마다 재시도
 
 // ── 설치 환경 상수 ────────────────────────────────────────────
 const float SENSOR_HEIGHT_CM   = 140.0;  // 센서 설치 높이 (cm)
@@ -87,9 +89,17 @@ unsigned long responseStartTime  = 0;
 // ════════════════════════════════════════════════════════════
 void ensureWiFi() {
   if (WiFi.status() == WL_CONNECTED) return;
+
+  unsigned long now = millis();
+  if (now - lastWifiRetry < WIFI_RETRY_INTERVAL_MS) return;  // 30초 쿨다운
+  lastWifiRetry = now;
+
   DBGLN("\n[WiFi] 재연결 시도...");
-  WiFi.disconnect();
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect(true);
+  delay(500);  // 내부 상태 안정화
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
   int retry = 0;
   while (WiFi.status() != WL_CONNECTED && retry < WIFI_RETRY_MAX) {
     delay(500); DBG("."); retry++;
@@ -98,7 +108,7 @@ void ensureWiFi() {
     DBGF("\n[WiFi] 재연결 성공: %s\n", WiFi.localIP().toString().c_str());
     digitalWrite(LED_PIN, HIGH);
   } else {
-    DBGLN("\n[WiFi] 재연결 실패 — 오프라인 모드 계속");
+    DBGLN("\n[WiFi] 재연결 실패 — 30초 후 재시도");
     digitalWrite(LED_PIN, LOW);
   }
 }
