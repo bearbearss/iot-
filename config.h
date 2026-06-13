@@ -1,12 +1,12 @@
 #pragma once
 
 // ── WiFi ─────────────────────────────────────────────────────
-#define WIFI_SSID       ""     // ← 수정 필수
-#define WIFI_PASSWORD   ""   // ← 수정 필수
+#define WIFI_SSID       "KT_GIGA_2G_Wave2_549B"     // ← 수정 필수
+#define WIFI_PASSWORD   "fzd3jbg175"   // ← 수정 필수
 
 // ── Flask 서버 (Raspberry Pi IP) ─────────────────────────────
 #define SERVER_IP       "192.168.0.xxx"  // ← 수정 필수 (hostname -I 로 확인)
-#define SERVER_PORT     5000
+#define SERVER_PORT     8765
 
 // ── 센서 핀 ──────────────────────────────────────────────────
 #define SDA_PIN         21    // VL53L1X I2C SDA
