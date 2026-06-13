@@ -881,6 +881,6 @@ if __name__ == "__main__":
     print("=" * 55)
     print("  Smart Bath Guard 서버 시작")
     print(f"  접근 코드: {ACCESS_CODE}")
-    print("  http://0.0.0.0:5000")
+    print(f"  http://0.0.0.0:{runtime_config['server_port']}")
     print("=" * 55)
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=runtime_config["server_port"], debug=True)

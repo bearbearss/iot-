@@ -16,7 +16,7 @@ DEVICE_ROOM    = os.environ.get("DEVICE_ROOM",    "욕실")
 
 # ── Flask 서버 ─────────────────────────────────────────────
 #   SERVER_PORT: 기본 5000 (변경 시 ESP32 config.h 도 함께 수정)
-SERVER_PORT    = int(os.environ.get("SERVER_PORT", 5000))
+SERVER_PORT    = int(os.environ.get("SERVER_PORT", 8765))
 SECRET_KEY     = os.environ.get("SECRET_KEY",     "change-this-in-production")
 
 # ── 보호자 접근 코드 ───────────────────────────────────────
