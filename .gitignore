@@ -4,5 +4,6 @@ __pycache__/
 *.pyo
 .env
 settings.json
+kakao_token.json
 *.log
 .DS_Store
